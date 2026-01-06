@@ -238,7 +238,7 @@ MASTER_PORT=$((29500 + ${SLURM_JOB_ID:-0} % 1000))
 accelerate launch \
     --num_processes=4 \
     --num_machines=1 \
-    --mixed_precision=bf16 \
+    --mixed_precision=fp16 \
     --main_process_port=${MASTER_PORT} \
     scripts/train.py \
     --config=config/base.py \
@@ -249,8 +249,7 @@ accelerate launch \
     --config.train.use_8bit_adam=True \
     --config.pretrained.model="CompVis/stable-diffusion-v1-4" \
     --config.save_freq=1 \
-    --config.mixed_precision="bf16" \
-    --config.per_prompt_stat_tracking=None \
+    --config.mixed_precision="fp16" \
     --config.run_name=$RUN_NAME
 
 # ============================================================================
