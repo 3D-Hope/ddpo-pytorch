@@ -241,16 +241,10 @@ accelerate launch \
     --mixed_precision=fp16 \
     --main_process_port=${MASTER_PORT} \
     scripts/train.py \
-    --config=config/base.py \
-    --config.sample.batch_size=16 \
-    --config.sample.num_batches_per_epoch=4 \
-    --config.train.batch_size=2 \
-    --config.train.gradient_accumulation_steps=4 \
-    --config.train.use_8bit_adam=True \
-    --config.pretrained.model="CompVis/stable-diffusion-v1-4" \
-    --config.save_freq=1 \
-    --config.mixed_precision="fp16" \
+    --config=config/dgx.py:compressibility \
     --config.run_name=$RUN_NAME
+
+
 
 # ============================================================================
 # Final status
