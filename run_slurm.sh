@@ -214,7 +214,7 @@ echo ""
 export PYTHONUNBUFFERED=1
 
 # Run accelerate launch
-accelerate launch scripts/train.py --config config=config/base.py
+accelerate launch scripts/train.py
 
 # ============================================================================
 # Final status
