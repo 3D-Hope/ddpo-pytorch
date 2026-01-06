@@ -232,35 +232,16 @@ echo "════════════════════════�
 echo ""
 
 
-export MASTER_ADDR=$(scontrol show hostnames ${SLURM_JOB_NODELIST} | head -n 1)
-export MASTER_PORT=29500
-export WORLD_SIZE=${SLURM_NTASKS}
-export RANK=${SLURM_PROCID}
-export LOCAL_RANK=${SLURM_LOCALID}
-
-# Find an available port if 29500 is in use
-if lsof -Pi :29500 -sTCP:LISTEN -t >/dev/null 2>&1 ; then
-    echo "Port 29500 in use, trying 29501..."
-    export MASTER_PORT=29501
-fi
-
-# Then use explicit accelerate launch:
-accelerate launch \
-    --num_processes=${SLURM_GPUS_ON_NODE:-4} \
-    --num_machines=1 \
-    --mixed_precision=bf16 \
-    --main_process_port=${MASTER_PORT} \
-    scripts/train.py \
+# Run accelerate launch
+accelerate launch scripts/train.py \
     --config=config/base.py \
     --config.sample.batch_size=16 \
     --config.sample.num_batches_per_epoch=4 \
     --config.train.batch_size=2 \
     --config.train.gradient_accumulation_steps=4 \
-    --config.train.use_8bit_adam=True \
     --config.pretrained.model="CompVis/stable-diffusion-v1-4" \
     --config.save_freq=1 \
-    --config.mixed_precision="bf16" \
-    --config.per_prompt_stat_tracking=None \
+    --config.mixed_precision="fp16" \
     --config.run_name=$RUN_NAME
 
 # ============================================================================
