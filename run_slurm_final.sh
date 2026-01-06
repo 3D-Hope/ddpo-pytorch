@@ -242,7 +242,9 @@ accelerate launch \
     --main_process_port=${MASTER_PORT} \
     scripts/train.py \
     --config=config/dgx.py:compressibility \
-    --config.run_name=$RUN_NAME
+    --config.run_name=$RUN_NAME \
+    --config.resume_from="logs/h200_compressibility_faster_20260106_185448"
+
 
 
 
