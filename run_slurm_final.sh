@@ -243,7 +243,7 @@ accelerate launch \
     scripts/train.py \
     --config=config/dgx.py:compressibility \
     --config.run_name=$RUN_NAME \
-    --config.resume_from="logs/h200_compressibility_faster_20260106_185448"
+    --config.resume_from="logs/h200_compressibility_faster_20260106_215820_2026.01.06_21.58.28"
 
 
 
