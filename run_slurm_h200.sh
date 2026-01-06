@@ -1,7 +1,8 @@
 #!/bin/bash
-#SBATCH --job-name=ddpo_pytorch
+#SBATCH --job-name=h200_compressibility
 #SBATCH --partition=batch
-#SBATCH --gpus=1
+#SBATCH --gpus=h200:1
+#SBATCH --nodelist=sof1-h200-4
 #SBATCH --cpus-per-task=16
 #SBATCH --mem-per-cpu=12G
 #SBATCH --time=2-00:00:00
@@ -212,6 +213,7 @@ echo "════════════════════════�
 echo ""
 
 export PYTHONUNBUFFERED=1
+RUN_NAME="h200_compressibility_$(date +%Y%m%d_%H%M%S)"
 
 # Run accelerate launch
 accelerate launch scripts/train.py \
@@ -221,8 +223,9 @@ accelerate launch scripts/train.py \
     --config.train.batch_size=4 \
     --config.train.gradient_accumulation_steps=2 \
     --config.pretrained.model="CompVis/stable-diffusion-v1-4" \
-    --config.save_freq=1
-    
+    --config.save_freq=1 \
+    --config.run_name=$RUN_NAME
+
 # ============================================================================
 # Final status
 # ============================================================================
