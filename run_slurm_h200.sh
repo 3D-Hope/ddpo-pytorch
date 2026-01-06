@@ -20,7 +20,6 @@ trap 'echo "🛑 Job interrupted"; exit 130' INT
 # ============================================================================
 # Set your wandb API key here or pass via environment variable
 # You can also set it before running: export WANDB_API_KEY="your-key-here"
-WANDB_API_KEY="${WANDB_API_KEY:-34b4ebd6c4b409b7f0bd2dfc8c6c27cd53bfef88}"
 WANDB_ENTITY="${WANDB_ENTITY:-078bct021-ashok-d}"
 
 # Project directory (adjust to your actual path)

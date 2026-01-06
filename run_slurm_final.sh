@@ -1,8 +1,7 @@
-#!/bin/bash
 #SBATCH --job-name=h200_compressibility_faster
 #SBATCH --partition=batch
 #SBATCH --gpus=h200:1
-#SBATCH --nodelist=sof1-h200-4
+#SBATCH --nodelist=sof1-h200-5
 #SBATCH --cpus-per-task=16
 #SBATCH --mem-per-cpu=12G
 #SBATCH --time=2-00:00:00
@@ -20,7 +19,6 @@ trap 'echo "🛑 Job interrupted"; exit 130' INT
 # ============================================================================
 # Set your wandb API key here or pass via environment variable
 # You can also set it before running: export WANDB_API_KEY="your-key-here"
-WANDB_API_KEY="${WANDB_API_KEY:-34b4ebd6c4b409b7f0bd2dfc8c6c27cd53bfef88}"
 WANDB_ENTITY="${WANDB_ENTITY:-078bct021-ashok-d}"
 
 # Project directory (adjust to your actual path)
@@ -94,7 +92,7 @@ echo "STAGE 2: Creating/activating conda env '$CONDA_ENV_NAME' with python=$DESI
 # Create if missing
 if ! "$CONDA_DIR/bin/conda" env list | awk '{print $1}' | grep -xq "$CONDA_ENV_NAME"; then
     echo "Creating conda environment: $CONDA_ENV_NAME (python=$DESIRED_PY)"
-    "$CONDA_DIR/bin/conda" create -n "$CONDA_ENV_NAME" python="$DESIRED_PY" -y || { 
+    "$CONDA_DIR/bin/conda" create -n "$CONDA_ENV_NAME" python="$DESIRED_PY" -y || {
         echo "❌ Failed to create conda env"; exit 1
     }
 else
@@ -133,15 +131,17 @@ pip install --upgrade pip --quiet || { echo "❌ Failed to upgrade pip"; exit 1;
 
 # Install huggingface_hub compatible version first (required for diffusers 0.17.1)
 echo "Installing compatible huggingface_hub version..."
-pip install "huggingface_hub<0.26.0" --quiet || { 
+pip install "huggingface_hub<0.26.0" --quiet || {
     echo "❌ Failed to install huggingface_hub"; exit 1
 }
 
 # Install project in editable mode
 echo "Installing project in editable mode (pip install -e .)..."
-pip install -e . || { 
+pip install -e . || {
     echo "❌ Failed to install project"; exit 1
 }
+
+pip install bitsandbytes
 
 echo "✅ Dependencies installed successfully"
 echo ""
@@ -214,17 +214,31 @@ echo ""
 
 export PYTHONUNBUFFERED=1
 RUN_NAME="h200_compressibility_faster_$(date +%Y%m%d_%H%M%S)"
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+
+# Force garbage collection and cache clearing
+python - <<'PYCLEAR'
+import torch
+import gc
+gc.collect()
+torch.cuda.empty_cache()
+torch.cuda.synchronize()
+print(f"Memory after clearing: {torch.cuda.memory_allocated()/1e9:.2f} GB / {torch.cuda.get_device_properties(0).total_memory/1e9:.2f} GB")
+PYCLEAR
 
 # Run accelerate launch
 accelerate launch scripts/train.py \
     --config=config/base.py \
-    --config.sample.batch_size=32 \
-    --config.sample.num_batches_per_epoch=8 \
-    --config.train.batch_size=16 \
-    --config.train.gradient_accumulation_steps=1 \
+    --config.sample.batch_size=64 \
+    --config.sample.num_batches_per_epoch=4 \
+    --config.train.batch_size=8 \
+    --config.train.gradient_accumulation_steps=4 \
+    --config.train.use_8bit_adam=True \
     --config.pretrained.model="CompVis/stable-diffusion-v1-4" \
     --config.save_freq=1 \
-    --config.mixed_precision="bf16" \
+    --config.mixed_precision="fp16" \
+    --config.per_prompt_stat_tracking.buffer_size=16 \
+    --config.per_prompt_stat_tracking.min_count=16 \
     --config.run_name=$RUN_NAME
 
 # ============================================================================
@@ -241,4 +255,3 @@ else
     exit $EXIT_CODE
 fi
 echo "════════════════════════════════════════════════════════════════════════"
-
