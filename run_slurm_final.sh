@@ -1,3 +1,4 @@
+#!/bin/bash
 #SBATCH --job-name=h200_compressibility_faster
 #SBATCH --partition=batch
 #SBATCH --gpus=h200:4
