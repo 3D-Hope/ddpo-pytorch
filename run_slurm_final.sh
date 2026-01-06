@@ -2,7 +2,7 @@
 #SBATCH --job-name=h200_compressibility_faster
 #SBATCH --partition=batch
 #SBATCH --gpus=h200:4
-#SBATCH --nodelist=sof1-h200-[1-7]
+#SBATCH --nodelist=sof1-h200-1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem-per-cpu=8G
 #SBATCH --time=2-00:00:00
