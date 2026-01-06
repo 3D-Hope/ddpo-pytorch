@@ -174,19 +174,19 @@ echo ""
 # ============================================================================
 # STAGE 5: Wandb login
 # ============================================================================
-echo "STAGE 5: Setting up Wandb..."
-if [ -z "$WANDB_API_KEY" ]; then
-    echo "⚠️  WANDB_API_KEY not set. Wandb login will be skipped."
-    echo "   Set WANDB_API_KEY environment variable before running this script if you want wandb logging."
-    echo "   Example: export WANDB_API_KEY='your-api-key-here'"
-else
-    echo "Logging into Wandb..."
-    export WANDB_API_KEY
-    wandb login "$WANDB_API_KEY" --relogin || {
-        echo "⚠️  Wandb login failed, but continuing..."
-    }
-    echo "✅ Wandb configured"
-fi
+# echo "STAGE 5: Setting up Wandb..."
+# if [ -z "$WANDB_API_KEY" ]; then
+#     echo "⚠️  WANDB_API_KEY not set. Wandb login will be skipped."
+#     echo "   Set WANDB_API_KEY environment variable before running this script if you want wandb logging."
+#     echo "   Example: export WANDB_API_KEY='your-api-key-here'"
+# else
+#     echo "Logging into Wandb..."
+#     export WANDB_API_KEY
+#     wandb login "$WANDB_API_KEY" --relogin || {
+#         echo "⚠️  Wandb login failed, but continuing..."
+#     }
+#     echo "✅ Wandb configured"
+# fi
 
 # Set wandb entity
 export WANDB_ENTITY="$WANDB_ENTITY"
