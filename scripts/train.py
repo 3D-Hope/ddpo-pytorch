@@ -77,6 +77,29 @@ def main(_):
         gradient_accumulation_steps=config.train.gradient_accumulation_steps
         * num_train_timesteps,
     )
+    
+    logger.info("=" * 80)
+    logger.info("GPU/Process Information:")
+    logger.info(f"  Number of processes: {accelerator.num_processes}")
+    logger.info(f"  Process index: {accelerator.process_index}")
+    logger.info(f"  Local process index: {accelerator.local_process_index}")
+    logger.info(f"  Main process: {accelerator.is_main_process}")
+    logger.info(f"  Local main process: {accelerator.is_local_main_process}")
+    logger.info(f"  Device: {accelerator.device}")
+    
+    # Log GPU details for each process
+    if torch.cuda.is_available():
+        logger.info(f"  CUDA device count: {torch.cuda.device_count()}")
+        logger.info(f"  Current CUDA device: {torch.cuda.current_device()}")
+        logger.info(f"  CUDA device name: {torch.cuda.get_device_name(accelerator.device)}")
+        logger.info(f"  CUDA_VISIBLE_DEVICES: {os.environ.get('CUDA_VISIBLE_DEVICES', 'Not set')}")
+        
+        # Log memory info
+        for i in range(torch.cuda.device_count()):
+            props = torch.cuda.get_device_properties(i)
+            logger.info(f"  GPU {i}: {props.name}, Memory: {props.total_memory / 1e9:.2f} GB")
+    logger.info("=" * 80)
+    
     if accelerator.is_main_process:
         accelerator.init_trackers(
             project_name="ddpo-pytorch",

@@ -1,7 +1,7 @@
 #SBATCH --job-name=h200_compressibility_faster
 #SBATCH --partition=batch
-#SBATCH --gpus=h200:1
-#SBATCH --nodelist=sof1-h200-5
+#SBATCH --gpus=h200:4
+#SBATCH --nodelist=sof1-h200-[1-7]
 #SBATCH --cpus-per-task=16
 #SBATCH --mem-per-cpu=12G
 #SBATCH --time=2-00:00:00
@@ -214,31 +214,51 @@ echo ""
 
 export PYTHONUNBUFFERED=1
 RUN_NAME="h200_compressibility_faster_$(date +%Y%m%d_%H%M%S)"
-export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
-# Force garbage collection and cache clearing
-python - <<'PYCLEAR'
+# ============================================================================
+# STAGE 6.5: Verify GPU allocation
+# ============================================================================
+echo "STAGE 6.5: Verifying GPU allocation..."
+echo "════════════════════════════════════════════════════════════════════════"
+echo "SLURM GPU Allocation:"
+echo "  SLURM_GPUS_ON_NODE: ${SLURM_GPUS_ON_NODE:-N/A}"
+echo "  SLURM_GPUS: ${SLURM_GPUS:-N/A}"
+echo "  CUDA_VISIBLE_DEVICES: ${CUDA_VISIBLE_DEVICES:-N/A}"
+echo ""
+
+echo "PyTorch GPU Detection:"
+python - <<'PYGPU'
 import torch
-import gc
-gc.collect()
-torch.cuda.empty_cache()
-torch.cuda.synchronize()
-print(f"Memory after clearing: {torch.cuda.memory_allocated()/1e9:.2f} GB / {torch.cuda.get_device_properties(0).total_memory/1e9:.2f} GB")
-PYCLEAR
+import os
+
+print(f"  CUDA available: {torch.cuda.is_available()}")
+print(f"  CUDA device count: {torch.cuda.device_count()}")
+print(f"  CUDA_VISIBLE_DEVICES: {os.environ.get('CUDA_VISIBLE_DEVICES', 'Not set')}")
+
+if torch.cuda.is_available():
+    print(f"\n  Detected GPUs:")
+    for i in range(torch.cuda.device_count()):
+        props = torch.cuda.get_device_properties(i)
+        mem_gb = props.total_memory / 1e9
+        print(f"    GPU {i}: {props.name} ({mem_gb:.1f} GB)")
+else:
+    print("  ❌ No CUDA devices found!")
+PYGPU
+
+echo "════════════════════════════════════════════════════════════════════════"
+echo ""
+
 
 # Run accelerate launch
 accelerate launch scripts/train.py \
     --config=config/base.py \
-    --config.sample.batch_size=64 \
+    --config.sample.batch_size=16 \
     --config.sample.num_batches_per_epoch=4 \
-    --config.train.batch_size=8 \
+    --config.train.batch_size=2 \
     --config.train.gradient_accumulation_steps=4 \
-    --config.train.use_8bit_adam=True \
     --config.pretrained.model="CompVis/stable-diffusion-v1-4" \
     --config.save_freq=1 \
     --config.mixed_precision="fp16" \
-    --config.per_prompt_stat_tracking.buffer_size=16 \
-    --config.per_prompt_stat_tracking.min_count=16 \
     --config.run_name=$RUN_NAME
 
 # ============================================================================
