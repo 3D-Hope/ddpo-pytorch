@@ -3,8 +3,8 @@
 #SBATCH --partition=batch
 #SBATCH --gpus=h200:4
 #SBATCH --nodelist=sof1-h200-[1-7]
-#SBATCH --cpus-per-task=16
-#SBATCH --mem-per-cpu=12G
+#SBATCH --cpus-per-task=4
+#SBATCH --mem-per-cpu=8G
 #SBATCH --time=2-00:00:00
 #SBATCH --output=logs/%x-%j.out
 #SBATCH --error=logs/%x-%j.err
