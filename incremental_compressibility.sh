@@ -1,8 +1,8 @@
 #!/bin/bash
-#SBATCH --job-name=normal_incompressibility
+#SBATCH --job-name=incremental_compressibility
 #SBATCH --partition=batch
 #SBATCH --gpus=h200:4
-#SBATCH --nodelist=sof1-h200-4
+#SBATCH --nodelist=sof1-h200-2
 #SBATCH --cpus-per-task=4
 #SBATCH --mem-per-cpu=8G
 #SBATCH --time=2-00:00:00
@@ -196,7 +196,7 @@ echo "════════════════════════�
 echo ""
 
 export PYTHONUNBUFFERED=1
-RUN_NAME="normal_incompressibility"
+RUN_NAME="incremental_compressibility"
 
 # ============================================================================
 # STAGE 6.5: Verify GPU allocation
@@ -240,9 +240,12 @@ accelerate launch \
     --num_machines=1 \
     --mixed_precision=fp16 \
     --main_process_port=${MASTER_PORT} \
-    scripts/train.py \
-    --config=config/dgx.py:incompressibility \
-    --config.run_name=$RUN_NAME
+    scripts/train_incremental.py \
+    --config=config/incremental.py:compressibility \
+    --config.run_name=$RUN_NAME \
+    --config.incremental_training=True
+
+
 
 # ============================================================================
 # Final status

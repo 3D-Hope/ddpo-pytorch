@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=h200_aesthetic_faster
+#SBATCH --job-name=normal_aesthetic
 #SBATCH --partition=batch
 #SBATCH --gpus=h200:4
 #SBATCH --nodelist=sof1-h200-2
@@ -196,7 +196,7 @@ echo "════════════════════════�
 echo ""
 
 export PYTHONUNBUFFERED=1
-RUN_NAME="h200_aesthetic_faster_$(date +%Y%m%d_%H%M%S)"
+RUN_NAME="normal_aesthetic"
 
 # ============================================================================
 # STAGE 6.5: Verify GPU allocation
