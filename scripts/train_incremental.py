@@ -342,7 +342,7 @@ def main(_):
             raise ValueError(f"Invalid incremental trend: {incremental_trend}")
         incremental_epochs = np.array([])
         incremental_steps = np.array([])
-        for i in range(min_steps, max_steps, increment_steps):
+        for i in range(min_steps, max_steps + 1, increment_steps):
             if incremental_trend == "constant":
                 incremental_epochs = np.append(incremental_epochs, incremental_constant_epochs)
                 incremental_steps = np.append(incremental_steps, i)

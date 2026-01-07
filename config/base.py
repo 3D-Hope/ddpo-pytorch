@@ -117,7 +117,7 @@ def get_config():
     config.incremental_max_steps = 50
     config.increment_steps = 5
     config.incremental_trend = "constant" # "constant" or "linear"
-    config.incremental_constant_epochs = 5
+    config.incremental_constant_epochs = 10
     config.incremental_linear_slope = 0.5
     
 
