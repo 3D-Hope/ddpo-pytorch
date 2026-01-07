@@ -59,7 +59,11 @@ def main(_):
             )
 
     # number of timesteps within each trajectory to train on
-    num_train_timesteps = int(config.sample.num_steps * config.train.timestep_fraction)
+    if config.incremental_training:
+        min_steps = config.incremental_min_steps
+        num_train_timesteps = int(min_steps * config.train.timestep_fraction)
+    else:
+        num_train_timesteps = int(config.sample.num_steps * config.train.timestep_fraction)
 
     accelerator_config = ProjectConfiguration(
         project_dir=os.path.join(config.logdir, config.run_name),
@@ -348,10 +352,6 @@ def main(_):
             else:
                 raise ValueError(f"Invalid incremental trend: {incremental_trend}")
         incremental_epochs_cumulative = np.cumsum(incremental_epochs)
-        # print(incremental_epochs)
-        # print(incremental_epocs_cumulative)
-        # import sys
-        # sys.exit()
 
     for epoch in range(first_epoch, config.num_epochs):
         #################### SAMPLING ####################
@@ -361,13 +361,13 @@ def main(_):
         if config.incremental_training:
             which_index = np.searchsorted(incremental_epochs_cumulative, epoch)
             sample_steps_this_epoch = int(incremental_steps[which_index])
-            print("Which index: ", which_index)
+            # logger.info("Which index: ", which_index)
             
         else:
             sample_steps_this_epoch = config.sample.num_steps
         pipeline.scheduler.set_timesteps(sample_steps_this_epoch, device=accelerator.device)
         
-        print("Num sample timesteps: ", sample_steps_this_epoch)
+        # logger.info("Num sample timesteps: ", sample_steps_this_epoch)
         for i in tqdm(
             range(config.sample.num_batches_per_epoch),
             desc=f"Epoch {epoch}: sampling",
@@ -517,7 +517,7 @@ def main(_):
         else:
             num_train_timesteps = int(config.sample.num_steps * config.train.timestep_fraction)
             
-        print("Num train timesteps: ", num_train_timesteps)
+        # logger.info("Num train timesteps: ", num_train_timesteps)
 
         #################### TRAINING ####################
         for inner_epoch in range(config.train.num_inner_epochs):
@@ -658,7 +658,12 @@ def main(_):
                         info = defaultdict(list)
 
             # make sure we did an optimization step at the end of the inner epoch
-            assert accelerator.sync_gradients
+            total_training_steps = len(samples_batched) * num_train_timesteps
+            expected_accumulation = config.train.gradient_accumulation_steps * num_train_timesteps
+            if total_training_steps >= expected_accumulation:
+                assert accelerator.sync_gradients, \
+                    f"Expected gradient sync but sync_gradients is False. " \
+                    f"Total steps: {total_training_steps}, Expected accumulation: {expected_accumulation}"
 
         if epoch != 0 and epoch % config.save_freq == 0 and accelerator.is_main_process:
             accelerator.save_state()
