@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=h200_compressibility_faster
+#SBATCH --job-name=h200_aesthetic_faster
 #SBATCH --partition=batch
 #SBATCH --gpus=h200:4
 #SBATCH --nodelist=sof1-h200-2
@@ -196,7 +196,7 @@ echo "════════════════════════�
 echo ""
 
 export PYTHONUNBUFFERED=1
-RUN_NAME="h200_compressibility_faster_$(date +%Y%m%d_%H%M%S)"
+RUN_NAME="h200_aesthetic_faster_$(date +%Y%m%d_%H%M%S)"
 
 # ============================================================================
 # STAGE 6.5: Verify GPU allocation
@@ -241,10 +241,8 @@ accelerate launch \
     --mixed_precision=fp16 \
     --main_process_port=${MASTER_PORT} \
     scripts/train.py \
-    --config=config/dgx.py:compressibility \
-    --config.run_name=$RUN_NAME \
-    --config.resume_from="logs/h200_compressibility_faster_20260106_215820_2026.01.06_21.58.28"
-
+    --config=config/dgx.py:aesthetic \
+    --config.run_name=$RUN_NAME
 
 
 
