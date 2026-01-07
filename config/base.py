@@ -109,5 +109,16 @@ def get_config():
     # the minimum number of reward values to store in the buffer before using the per-prompt mean and std. if the buffer
     # contains fewer than `min_count` values, the mean and std of the entire batch will be used instead.
     config.per_prompt_stat_tracking.min_count = 16
+    
+    
+    # Incremental training
+    config.incremental_training = False
+    config.incremental_min_steps = 5
+    config.incremental_max_steps = 50
+    config.increment_steps = 5
+    config.incremental_trend = "constant" # "constant" or "linear"
+    config.incremental_constant_epochs = 5
+    config.incremental_linear_slope = 0.5
+    
 
     return config
