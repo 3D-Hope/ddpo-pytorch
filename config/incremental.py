@@ -16,12 +16,12 @@ def compressibility():
     config.num_checkpoint_limit = 100000000
 
     # the DGX machine I used had 8 GPUs, so this corresponds to 8 * 8 * 4 = 256 samples per epoch.
-    config.sample.batch_size = 8
-    config.sample.num_batches_per_epoch = 4
+    config.sample.batch_size = 16
+    config.sample.num_batches_per_epoch = 2
 
     # this corresponds to (8 * 4) / (4 * 2) = 4 gradient updates per epoch.
-    config.train.batch_size = 4
-    config.train.gradient_accumulation_steps = 2
+    config.train.batch_size = 8
+    config.train.gradient_accumulation_steps = 1
 
     # prompting
     config.prompt_fn = "imagenet_animals"
