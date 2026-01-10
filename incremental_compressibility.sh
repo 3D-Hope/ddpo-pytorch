@@ -1,10 +1,10 @@
 #!/bin/bash
-#SBATCH --job-name=incremental_compressibility
+#SBATCH --job-name=incremental_compressibility_0110
 #SBATCH --partition=batch
 #SBATCH --gpus=h200:4
 #SBATCH --nodelist=sof1-h200-2
 #SBATCH --cpus-per-task=4
-#SBATCH --mem-per-cpu=8G
+#SBATCH --mem-per-cpu=16G
 #SBATCH --time=2-00:00:00
 #SBATCH --output=logs/%x-%j.out
 #SBATCH --error=logs/%x-%j.err
@@ -196,7 +196,7 @@ echo "════════════════════════�
 echo ""
 
 export PYTHONUNBUFFERED=1
-RUN_NAME="incremental_compressibility"
+RUN_NAME="incremental_compressibility_0110"
 
 # ============================================================================
 # STAGE 6.5: Verify GPU allocation
@@ -244,7 +244,6 @@ accelerate launch \
     --config=config/incremental.py:compressibility \
     --config.run_name=$RUN_NAME \
     --config.incremental_training=True
-
 
 
 # ============================================================================

@@ -73,6 +73,7 @@ def main(_):
 
     accelerator = Accelerator(
         log_with="wandb",
+        # log_with=None,
         mixed_precision=config.mixed_precision,
         project_config=accelerator_config,
         # we always accumulate gradients across timesteps; we want config.train.gradient_accumulation_steps to be the
@@ -185,7 +186,28 @@ def main(_):
         unet = _Wrapper(pipeline.unet.attn_processors)
     else:
         unet = pipeline.unet
-
+        
+    def get_timesteps_for_num_steps(num_steps):
+        if num_steps == 50:
+            return [981, 961, 941, 921, 901, 881, 861, 841, 821, 801, 781, 761, 741, 721, 701, 681, 661, 641, 621, 601, 581, 561, 541, 521, 501, 481, 461, 441, 421, 401, 381, 361, 341, 321, 301, 281, 261, 241, 221, 201, 181, 161, 141, 121, 101, 81, 61, 41, 21, 1]
+        elif num_steps == 45:
+            return [981, 941, 921, 901, 881, 861, 841, 821, 801, 781, 761, 741, 721, 701, 681, 661, 641, 621, 601, 561, 541, 521, 501, 481, 461, 441, 421, 401, 381, 341, 321, 301, 281, 261, 241, 201, 181, 161, 141, 121, 81, 61, 41, 21, 1]
+        elif num_steps == 40:
+            return [981, 941, 901, 881, 861, 841, 821, 801, 781, 761, 741, 701, 681, 661, 641, 621, 561, 541, 521, 501, 481, 461, 441, 421, 381, 341, 321, 301, 281, 261, 241, 201, 181, 141, 121, 81, 61, 41, 21, 1]
+        elif num_steps == 35:
+            return [981, 941, 901, 881, 841, 821, 801, 781, 761, 741, 701, 661, 641, 621, 561, 541, 501, 481, 461, 421, 381, 341, 321, 301, 281, 241, 201, 181, 141, 121, 81, 61, 41, 21, 1]
+        elif num_steps == 30:
+            return [981, 941, 881, 841, 821, 801, 781, 741, 701, 661, 641, 561, 541, 501, 481, 461, 421, 341, 321, 301, 281, 241, 201, 181, 121, 81, 61, 41, 21, 1]
+        elif num_steps == 25:
+            return [981, 941, 881, 821, 801, 781, 741, 701, 641, 561, 541, 501, 481, 461, 341, 321, 301, 241, 201, 181, 121, 81, 41, 21, 1]
+        elif num_steps == 20:
+            return [981, 881, 821, 801, 741, 701, 641, 561, 501, 481, 461, 341, 301, 241, 201, 181, 121, 81, 41, 1]
+        elif num_steps == 15:
+            return [981, 881, 801, 741, 641, 561, 501, 461, 341, 301, 201, 181, 81, 41, 1]
+        elif num_steps == 10:
+            return [981, 801, 741, 641, 561, 461, 301, 201, 81, 1]
+        elif num_steps == 5:
+            return [981, 741, 641, 201, 1]
     # set up diffusers-friendly checkpoint saving with Accelerate
 
     def save_model_hook(models, weights, output_dir):
@@ -361,12 +383,17 @@ def main(_):
         if config.incremental_training:
             which_index = np.searchsorted(incremental_epochs_cumulative, epoch)
             sample_steps_this_epoch = int(incremental_steps[which_index])
-            # logger.info("Which index: ", which_index)
-            
+            pipeline.scheduler.set_timesteps(sample_steps_this_epoch, device=accelerator.device)
+            pipeline.scheduler.timesteps = torch.tensor(get_timesteps_for_num_steps(sample_steps_this_epoch), device=accelerator.device)
         else:
             sample_steps_this_epoch = config.sample.num_steps
-        pipeline.scheduler.set_timesteps(sample_steps_this_epoch, device=accelerator.device)
+            pipeline.scheduler.set_timesteps(sample_steps_this_epoch, device=accelerator.device)
         
+        # if accelerator.is_main_process:
+        #     logger.info(f"Epoch {epoch}: Selected timesteps (out of {pipeline.scheduler.config.num_train_timesteps}):")
+        #     logger.info(f"  Timesteps: {pipeline.scheduler.timesteps.cpu().tolist()}")
+        #     logger.info(f"  Number of inference steps: {len(pipeline.scheduler.timesteps)}")
+        #     logger.info(f"  First timestep: {pipeline.scheduler.timesteps[0].item()}, Last timestep: {pipeline.scheduler.timesteps[-1].item()}")        
         # logger.info("Num sample timesteps: ", sample_steps_this_epoch)
         for i in tqdm(
             range(config.sample.num_batches_per_epoch),
