@@ -673,15 +673,16 @@ def main(_):
 
                     # Checks if the accelerator has performed an optimization step behind the scenes
                     if accelerator.sync_gradients:
-                        logger.info(f"Gradient sync at batch {i}, timestep {j}")
-                        logger.info(f"num_train_timesteps: {num_train_timesteps}")
-                        logger.info("TEST:", (i + 1) % config.train.gradient_accumulation_steps)
+                        print(f"Gradient sync at batch {i}, timestep {j}")
+                        print(f"num_train_timesteps: {num_train_timesteps}")
+                        print("TEST:", (i + 1) % config.train.gradient_accumulation_steps)
                         if not ((j == num_train_timesteps - 1) and ((i + 1) % config.train.gradient_accumulation_steps == 0)):
                             logger.warning(
                                 f"Gradient sync at unexpected point: batch={i}, timestep={j}, "
                                 f"expected: batch multiple of {config.train.gradient_accumulation_steps}, "
                                 f"timestep {num_train_timesteps - 1}"
                             )
+                            raise ValueError("Gradient sync at unexpected point")
                         
                         # log training-related stuff
                         info = {k: torch.mean(torch.stack(v)) for k, v in info.items()}
