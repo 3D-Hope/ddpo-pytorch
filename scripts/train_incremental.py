@@ -73,8 +73,8 @@ def main(_):
     )
 
     accelerator = Accelerator(
-        # log_with="wandb",
-        log_with=None,
+        log_with="wandb",
+        # log_with=None,
         mixed_precision=config.mixed_precision,
         project_config=accelerator_config,
         # we always accumulate gradients across timesteps; we want config.train.gradient_accumulation_steps to be the
