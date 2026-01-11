@@ -710,14 +710,13 @@ def main(_):
                     optimizer.zero_grad()
 
             # make sure we did an optimization step at the end of the inner epoch
-            # total_training_steps = len(samples_batched) * num_train_timesteps
-            # expected_accumulation = config.train.gradient_accumulation_steps * num_train_timesteps
-            # if total_training_steps >= expected_accumulation:
-            #     assert accelerator.sync_gradients, \
-            #         f"Expected gradient sync but sync_gradients is False. " \
-            #         f"Total steps: {total_training_steps}, Expected accumulation: {expected_accumulation}"
+            total_training_steps = len(samples_batched) * num_train_timesteps
+            expected_accumulation = config.train.gradient_accumulation_steps * num_train_timesteps
+            if total_training_steps >= expected_accumulation:
+                assert should_sync, \
+                    f"Expected gradient sync but sync_gradients is False. " \
+                    f"Total steps: {total_training_steps}, Expected accumulation: {expected_accumulation}"
             
-            assert should_sync, "Gradients did not sync at the end of the inner epoch"
 
         if epoch != 0 and epoch % config.save_freq == 0 and accelerator.is_main_process:
             accelerator.save_state()
