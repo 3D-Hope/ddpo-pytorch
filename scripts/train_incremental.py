@@ -630,71 +630,71 @@ def main(_):
                     sync_context = accelerator.no_sync(unet)
                     
                     with sync_context:
-                        with accelerator.accumulate(unet):
-                            with autocast():
-                                if config.train.cfg:
-                                    noise_pred = unet(
-                                        torch.cat([sample["latents"][:, j]] * 2),
-                                        torch.cat([sample["timesteps"][:, j]] * 2),
-                                        embeds,
-                                    ).sample
-                                    noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
-                                    noise_pred = (
-                                        noise_pred_uncond
-                                        + config.sample.guidance_scale
-                                        * (noise_pred_text - noise_pred_uncond)
-                                    )
-                                else:
-                                    noise_pred = unet(
-                                        sample["latents"][:, j],
-                                        sample["timesteps"][:, j],
-                                        embeds,
-                                    ).sample
-                                
-                                # compute the log prob of next_latents given latents under the current model
-                                _, log_prob = ddim_step_with_logprob(
-                                    pipeline.scheduler,
-                                    noise_pred,
-                                    sample["timesteps"][:, j],
+                        # with accelerator.accumulate(unet):
+                        with autocast():
+                            if config.train.cfg:
+                                noise_pred = unet(
+                                    torch.cat([sample["latents"][:, j]] * 2),
+                                    torch.cat([sample["timesteps"][:, j]] * 2),
+                                    embeds,
+                                ).sample
+                                noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+                                noise_pred = (
+                                    noise_pred_uncond
+                                    + config.sample.guidance_scale
+                                    * (noise_pred_text - noise_pred_uncond)
+                                )
+                            else:
+                                noise_pred = unet(
                                     sample["latents"][:, j],
-                                    eta=config.sample.eta,
-                                    prev_sample=sample["next_latents"][:, j],
-                                )
+                                    sample["timesteps"][:, j],
+                                    embeds,
+                                ).sample
+                            
+                            # compute the log prob of next_latents given latents under the current model
+                            _, log_prob = ddim_step_with_logprob(
+                                pipeline.scheduler,
+                                noise_pred,
+                                sample["timesteps"][:, j],
+                                sample["latents"][:, j],
+                                eta=config.sample.eta,
+                                prev_sample=sample["next_latents"][:, j],
+                            )
 
-                                # ppo logic
-                                advantages = torch.clamp(
-                                    sample["advantages"],
-                                    -config.train.adv_clip_max,
-                                    config.train.adv_clip_max,
-                                )
-                                ratio = torch.exp(log_prob - sample["log_probs"][:, j])
-                                unclipped_loss = -advantages * ratio
-                                clipped_loss = -advantages * torch.clamp(
-                                    ratio,
-                                    1.0 - config.train.clip_range,
-                                    1.0 + config.train.clip_range,
-                                )
-                                loss = torch.mean(torch.maximum(unclipped_loss, clipped_loss))
+                            # ppo logic
+                            advantages = torch.clamp(
+                                sample["advantages"],
+                                -config.train.adv_clip_max,
+                                config.train.adv_clip_max,
+                            )
+                            ratio = torch.exp(log_prob - sample["log_probs"][:, j])
+                            unclipped_loss = -advantages * ratio
+                            clipped_loss = -advantages * torch.clamp(
+                                ratio,
+                                1.0 - config.train.clip_range,
+                                1.0 + config.train.clip_range,
+                            )
+                            loss = torch.mean(torch.maximum(unclipped_loss, clipped_loss))
 
-                                # debugging values
-                                # John Schulman says that (ratio - 1) - log(ratio) is a better
-                                # estimator, but most existing code uses this so...
-                                # http://joschu.net/blog/kl-approx.html
-                                info["approx_kl"].append(
-                                    0.5
-                                    * torch.mean((log_prob - sample["log_probs"][:, j]) ** 2)
+                            # debugging values
+                            # John Schulman says that (ratio - 1) - log(ratio) is a better
+                            # estimator, but most existing code uses this so...
+                            # http://joschu.net/blog/kl-approx.html
+                            info["approx_kl"].append(
+                                0.5
+                                * torch.mean((log_prob - sample["log_probs"][:, j]) ** 2)
+                            )
+                            info["clipfrac"].append(
+                                torch.mean(
+                                    (
+                                        torch.abs(ratio - 1.0) > config.train.clip_range
+                                    ).float()
                                 )
-                                info["clipfrac"].append(
-                                    torch.mean(
-                                        (
-                                            torch.abs(ratio - 1.0) > config.train.clip_range
-                                        ).float()
-                                    )
-                                )
-                                info["loss"].append(loss)
+                            )
+                            info["loss"].append(loss)
 
-                                # backward pass
-                                accelerator.backward(loss)
+                            # backward pass
+                            accelerator.backward(loss)
                     
                     # Sync and step at the last timestep of each batch
                     if should_sync:
