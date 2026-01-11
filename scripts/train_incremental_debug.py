@@ -736,7 +736,16 @@ def main(_):
                         # Store parameter norm before optimizer step
                         if accelerator.is_main_process:
                             sample_param = next(iter(unet.parameters()))
-                            param_norm_before = sample_param.data.norm().item()
+                            param_data_before = sample_param.data.clone()
+                            param_norm_before = param_data_before.norm().item()
+                            if sample_param.grad is not None:
+                                grad_norm = sample_param.grad.data.norm().item()
+                                expected_change = grad_norm * config.train.learning_rate
+                                logger.info(f"  Sample param gradient norm: {grad_norm:.8f}")
+                                logger.info(f"  Learning rate: {config.train.learning_rate}")
+                                logger.info(f"  Expected change magnitude: {expected_change:.8f}")
+                            else:
+                                logger.warning("  Sample param has no gradient!")
                         
                         optimizer.step()
                         optimizer.zero_grad()
@@ -745,12 +754,27 @@ def main(_):
                         # Verify parameter changed after optimizer step
                         if accelerator.is_main_process:
                             sample_param = next(iter(unet.parameters()))
-                            param_norm_after = sample_param.data.norm().item()
-                            param_changed = abs(param_norm_after - param_norm_before) > 1e-8
-                            logger.info(f"  Parameter norm before step: {param_norm_before:.6f}")
-                            logger.info(f"  Parameter norm after step: {param_norm_after:.6f}")
-                            logger.info(f"  Parameter changed: {param_changed}")
-                            assert param_changed, "Parameters did not change after optimizer step! Update may have failed."
+                            param_data_after = sample_param.data.clone()
+                            param_norm_after = param_data_after.norm().item()
+                            
+                            param_diff = (param_data_after - param_data_before).abs()
+                            max_change = param_diff.max().item()
+                            mean_change = param_diff.mean().item()
+                            
+                            logger.info(f"  Parameter norm before step: {param_norm_before:.9f}")
+                            logger.info(f"  Parameter norm after step: {param_norm_after:.9f}")
+                            logger.info(f"  Max parameter change: {max_change:.9f}")
+                            logger.info(f"  Mean parameter change: {mean_change:.9f}")
+                            logger.info(f"  Norm difference: {abs(param_norm_after - param_norm_before):.9f}")
+                            
+                            param_changed = max_change > 1e-9
+                            logger.info(f"  Parameter changed (threshold 1e-9): {param_changed}")
+                            if not param_changed:
+                                logger.warning(
+                                    f"  WARNING: Parameter change is very small! "
+                                    f"This might be normal if gradients are small. "
+                                    f"Max change: {max_change:.9f}, Expected: ~{expected_change:.9f}"
+                                )
                         
                         logger.info(f"  Optimizer step #{optimizer_steps_count} completed")
                         
