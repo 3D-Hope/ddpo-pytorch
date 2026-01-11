@@ -590,12 +590,16 @@ def main(_):
             ):
                 forward_pass_counter += 1
                 target_accumulation = config.train.gradient_accumulation_steps * num_train_timesteps
+                logger.info(f"forward_pass_counter: {forward_pass_counter}, target_accumulation: {target_accumulation}")
                 is_last_timestep = (forward_pass_counter == target_accumulation)
+                logger.info(f"is_last_timestep: {is_last_timestep}")
                 batches_accumulated = (forward_pass_counter - 1) // num_train_timesteps + 1
+                logger.info(f"batches_accumulated: {batches_accumulated}")
                 should_sync = (
                             is_last_timestep and 
                             (batches_accumulated % config.train.gradient_accumulation_steps == 0)
                         )
+                logger.info(f"should_sync: {should_sync}")
                 sync_context = accelerator.no_sync(unet) if not should_sync else nullcontext()
                 
                 with sync_context:
@@ -681,6 +685,7 @@ def main(_):
                                     # backward pass
                                     accelerator.backward(loss)
                 if should_sync:
+                    logger.info(f"Syncing gradients at batch {i}, timestep {j} with num_train_timesteps {num_train_timesteps}")
                     accelerator.clip_grad_norm_(
                         unet.parameters(), config.train.max_grad_norm
                     )

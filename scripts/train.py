@@ -354,7 +354,7 @@ def main(_):
             ).input_ids.to(accelerator.device)
             prompt_embeds = pipeline.text_encoder(prompt_ids)[0]
 
-            # sample
+            # sample without gradient tracking
             with autocast():
                 images, _, latents, log_probs = pipeline_with_logprob(
                     pipeline,
@@ -552,7 +552,7 @@ def main(_):
                             _, log_prob = ddim_step_with_logprob(
                                 pipeline.scheduler,
                                 noise_pred,
-                                sample["timesteps"][:, j],
+                                sample["timesteps"][:, j], # uses the correct timestep value as permuted earlier because this is the sampled samples that is constant for this epoch.
                                 sample["latents"][:, j],
                                 eta=config.sample.eta,
                                 prev_sample=sample["next_latents"][:, j],
@@ -601,7 +601,7 @@ def main(_):
 
                     # Checks if the accelerator has performed an optimization step behind the scenes
                     if accelerator.sync_gradients:
-                        assert (j == num_train_timesteps - 1) and (
+                        assert (j == num_train_timesteps - 1) and ( # TODO: verify logic and comm with Saugat
                             i + 1
                         ) % config.train.gradient_accumulation_steps == 0
                         # log training-related stuff
