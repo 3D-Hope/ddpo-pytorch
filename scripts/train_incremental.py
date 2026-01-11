@@ -24,6 +24,7 @@ from functools import partial
 import tqdm
 import tempfile
 from PIL import Image
+from contextlib import nullcontext
 
 tqdm = partial(tqdm.tqdm, dynamic_ncols=True)
 
@@ -72,15 +73,14 @@ def main(_):
     )
 
     accelerator = Accelerator(
-        log_with="wandb",
-        # log_with=None,
+        # log_with="wandb",
+        log_with=None,
         mixed_precision=config.mixed_precision,
         project_config=accelerator_config,
         # we always accumulate gradients across timesteps; we want config.train.gradient_accumulation_steps to be the
         # number of *samples* we accumulate across, so we need to multiply by the number of training timesteps to get
         # the total number of optimizer steps to accumulate across.
-        gradient_accumulation_steps=config.train.gradient_accumulation_steps
-        * num_train_timesteps,
+        gradient_accumulation_steps=1,
     )
     
     logger.info("=" * 80)
@@ -579,6 +579,24 @@ def main(_):
             # train
             pipeline.unet.train()
             info = defaultdict(list)
+            optimizer_steps_count = 0  # Track number of optimizer steps
+            
+            logger.info("=" * 80)
+            logger.info(f"Starting training for epoch {epoch}.{inner_epoch}")
+            logger.info(f"  Number of batches: {len(samples_batched)}")
+            logger.info(f"  Number of training timesteps per batch: {num_train_timesteps}")
+            logger.info(f"  Gradient accumulation steps: {config.train.gradient_accumulation_steps}")
+            logger.info(f"  Expected sync points: At last timestep (j={num_train_timesteps-1}) of each batch")
+            logger.info("=" * 80)
+            
+            # Store initial optimizer state for verification
+            initial_param_norm = None
+            if accelerator.is_main_process and len(samples_batched) > 0:
+                # Get a sample parameter to track changes
+                sample_param = next(iter(unet.parameters()))
+                initial_param_norm = sample_param.data.norm().item()
+                logger.info(f"Initial parameter norm (sample): {initial_param_norm:.6f}")
+            
             for i, sample in tqdm(
                 list(enumerate(samples_batched)),
                 desc=f"Epoch {epoch}.{inner_epoch}: training",
@@ -600,105 +618,199 @@ def main(_):
                     leave=False,
                     disable=not accelerator.is_local_main_process,
                 ):
-                    with accelerator.accumulate(unet):
-                        with autocast():
-                            if config.train.cfg:
-                                noise_pred = unet(
-                                    torch.cat([sample["latents"][:, j]] * 2),
-                                    torch.cat([sample["timesteps"][:, j]] * 2),
-                                    embeds,
-                                ).sample
-                                noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
-                                noise_pred = (
-                                    noise_pred_uncond
-                                    + config.sample.guidance_scale
-                                    * (noise_pred_text - noise_pred_uncond)
-                                )
-                            else:
-                                noise_pred = unet(
-                                    sample["latents"][:, j],
+                    # With gradient_accumulation_steps = 1, sync at the last timestep of each batch
+                    is_last_timestep = (j == num_train_timesteps - 1)
+                    should_sync = is_last_timestep
+                    
+                    # Assertion: Verify sync logic is correct
+                    assert should_sync == (j == num_train_timesteps - 1), \
+                        f"Sync logic error: should_sync={should_sync}, j={j}, num_train_timesteps={num_train_timesteps}"
+                    
+                    # Use no_sync() to prevent automatic sync except at the last timestep
+                    sync_context = accelerator.no_sync(unet) if not should_sync else nullcontext()
+                    
+                    with sync_context:
+                        with accelerator.accumulate(unet):
+                            with autocast():
+                                if config.train.cfg:
+                                    noise_pred = unet(
+                                        torch.cat([sample["latents"][:, j]] * 2),
+                                        torch.cat([sample["timesteps"][:, j]] * 2),
+                                        embeds,
+                                    ).sample
+                                    noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+                                    noise_pred = (
+                                        noise_pred_uncond
+                                        + config.sample.guidance_scale
+                                        * (noise_pred_text - noise_pred_uncond)
+                                    )
+                                else:
+                                    noise_pred = unet(
+                                        sample["latents"][:, j],
+                                        sample["timesteps"][:, j],
+                                        embeds,
+                                    ).sample
+                                
+                                # compute the log prob of next_latents given latents under the current model
+                                _, log_prob = ddim_step_with_logprob(
+                                    pipeline.scheduler,
+                                    noise_pred,
                                     sample["timesteps"][:, j],
-                                    embeds,
-                                ).sample
-                            # compute the log prob of next_latents given latents under the current model
-                            _, log_prob = ddim_step_with_logprob(
-                                pipeline.scheduler,
-                                noise_pred,
-                                sample["timesteps"][:, j],
-                                sample["latents"][:, j],
-                                eta=config.sample.eta,
-                                prev_sample=sample["next_latents"][:, j],
-                            )
+                                    sample["latents"][:, j],
+                                    eta=config.sample.eta,
+                                    prev_sample=sample["next_latents"][:, j],
+                                )
 
-                        # ppo logic
-                        advantages = torch.clamp(
-                            sample["advantages"],
-                            -config.train.adv_clip_max,
-                            config.train.adv_clip_max,
-                        )
-                        ratio = torch.exp(log_prob - sample["log_probs"][:, j])
-                        unclipped_loss = -advantages * ratio
-                        clipped_loss = -advantages * torch.clamp(
-                            ratio,
-                            1.0 - config.train.clip_range,
-                            1.0 + config.train.clip_range,
-                        )
-                        loss = torch.mean(torch.maximum(unclipped_loss, clipped_loss))
+                                # ppo logic
+                                advantages = torch.clamp(
+                                    sample["advantages"],
+                                    -config.train.adv_clip_max,
+                                    config.train.adv_clip_max,
+                                )
+                                ratio = torch.exp(log_prob - sample["log_probs"][:, j])
+                                unclipped_loss = -advantages * ratio
+                                clipped_loss = -advantages * torch.clamp(
+                                    ratio,
+                                    1.0 - config.train.clip_range,
+                                    1.0 + config.train.clip_range,
+                                )
+                                loss = torch.mean(torch.maximum(unclipped_loss, clipped_loss))
 
-                        # debugging values
-                        # John Schulman says that (ratio - 1) - log(ratio) is a better
-                        # estimator, but most existing code uses this so...
-                        # http://joschu.net/blog/kl-approx.html
-                        info["approx_kl"].append(
-                            0.5
-                            * torch.mean((log_prob - sample["log_probs"][:, j]) ** 2)
-                        )
-                        info["clipfrac"].append(
-                            torch.mean(
-                                (
-                                    torch.abs(ratio - 1.0) > config.train.clip_range
-                                ).float()
-                            )
-                        )
-                        info["loss"].append(loss)
+                                # debugging values
+                                # John Schulman says that (ratio - 1) - log(ratio) is a better
+                                # estimator, but most existing code uses this so...
+                                # http://joschu.net/blog/kl-approx.html
+                                info["approx_kl"].append(
+                                    0.5
+                                    * torch.mean((log_prob - sample["log_probs"][:, j]) ** 2)
+                                )
+                                info["clipfrac"].append(
+                                    torch.mean(
+                                        (
+                                            torch.abs(ratio - 1.0) > config.train.clip_range
+                                        ).float()
+                                    )
+                                )
+                                info["loss"].append(loss)
 
-                        # backward pass
-                        accelerator.backward(loss)
-                        if accelerator.sync_gradients:
-                            accelerator.clip_grad_norm_(
-                                unet.parameters(), config.train.max_grad_norm
-                            )
+                                # backward pass
+                                accelerator.backward(loss)
+                    
+                    # Sync and step at the last timestep of each batch
+                    if should_sync:
+                        # Assertion: Verify we're at the last timestep
+                        assert j == num_train_timesteps - 1, \
+                            f"Sync should only happen at last timestep! j={j}, num_train_timesteps={num_train_timesteps}"
+                        
+                        logger.info(f"[VERIFY] Syncing gradients at batch {i}/{len(samples_batched)-1}, timestep {j}/{num_train_timesteps-1}")
+                        logger.info(f"  num_train_timesteps: {num_train_timesteps}")
+                        logger.info(f"  is_last_timestep: {is_last_timestep}")
+                        
+                        # Check if gradients exist before clipping
+                        has_gradients = any(p.grad is not None for p in unet.parameters() if p.requires_grad)
+                        assert has_gradients, "No gradients found before sync! Backward pass may have failed."
+                        logger.info(f"  Gradients present: {has_gradients}")
+                        
+                        # Get gradient norm before clipping
+                        total_grad_norm = 0.0
+                        for p in unet.parameters():
+                            if p.grad is not None:
+                                param_norm = p.grad.data.norm(2)
+                                total_grad_norm += param_norm.item() ** 2
+                        total_grad_norm = total_grad_norm ** (1. / 2)
+                        logger.info(f"  Gradient norm before clipping: {total_grad_norm:.6f}")
+                        
+                        accelerator.clip_grad_norm_(
+                            unet.parameters(), config.train.max_grad_norm
+                        )
+                        
+                        # Get gradient norm after clipping
+                        total_grad_norm_after = 0.0
+                        for p in unet.parameters():
+                            if p.grad is not None:
+                                param_norm = p.grad.data.norm(2)
+                                total_grad_norm_after += param_norm.item() ** 2
+                        total_grad_norm_after = total_grad_norm_after ** (1. / 2)
+                        logger.info(f"  Gradient norm after clipping: {total_grad_norm_after:.6f}")
+                        
+                        # Store parameter norm before optimizer step
+                        if accelerator.is_main_process:
+                            sample_param = next(iter(unet.parameters()))
+                            param_data_before = sample_param.data.clone()
+                            param_norm_before = param_data_before.norm().item()
+                            if sample_param.grad is not None:
+                                grad_norm = sample_param.grad.data.norm().item()
+                                expected_change = grad_norm * config.train.learning_rate
+                                logger.info(f"  Sample param gradient norm: {grad_norm:.8f}")
+                                logger.info(f"  Learning rate: {config.train.learning_rate}")
+                                logger.info(f"  Expected change magnitude: {expected_change:.8f}")
+                            else:
+                                logger.warning("  Sample param has no gradient!")
+                        
                         optimizer.step()
                         optimizer.zero_grad()
-
-                    # Checks if the accelerator has performed an optimization step behind the scenes
-                    if accelerator.sync_gradients:
-                        # print(f"Gradient sync at batch {i}, timestep {j}")
-                        # print(f"num_train_timesteps: {num_train_timesteps}")
-                        # print("TEST:", (i + 1) % config.train.gradient_accumulation_steps)
-                        if not ((j == num_train_timesteps - 1) and ((i + 1) % config.train.gradient_accumulation_steps == 0)):
-                            logger.warning(
-                                f"Gradient sync at unexpected point: batch={i}, timestep={j}, "
-                                f"expected: batch multiple of {config.train.gradient_accumulation_steps}, "
-                                f"timestep {num_train_timesteps - 1}"
-                            )
-                            raise ValueError("Gradient sync at unexpected point")
+                        optimizer_steps_count += 1
                         
-                        # log training-related stuff
+                        # Verify parameter changed after optimizer step
+                        if accelerator.is_main_process:
+                            sample_param = next(iter(unet.parameters()))
+                            param_data_after = sample_param.data.clone()
+                            param_norm_after = param_data_after.norm().item()
+                            
+                            param_diff = (param_data_after - param_data_before).abs()
+                            max_change = param_diff.max().item()
+                            mean_change = param_diff.mean().item()
+                            
+                            logger.info(f"  Parameter norm before step: {param_norm_before:.9f}")
+                            logger.info(f"  Parameter norm after step: {param_norm_after:.9f}")
+                            logger.info(f"  Max parameter change: {max_change:.9f}")
+                            logger.info(f"  Mean parameter change: {mean_change:.9f}")
+                            logger.info(f"  Norm difference: {abs(param_norm_after - param_norm_before):.9f}")
+                            
+                            param_changed = max_change > 1e-9
+                            logger.info(f"  Parameter changed (threshold 1e-9): {param_changed}")
+                            if not param_changed:
+                                logger.warning(
+                                    f"  WARNING: Parameter change is very small! "
+                                    f"This might be normal if gradients are small. "
+                                    f"Max change: {max_change:.9f}, Expected: ~{expected_change:.9f}"
+                                )
+                        
+                        logger.info(f"  Optimizer step #{optimizer_steps_count} completed")
+                        
+                        # Log training-related stuff
                         info = {k: torch.mean(torch.stack(v)) for k, v in info.items()}
                         info = accelerator.reduce(info, reduction="mean")
                         info.update({"epoch": epoch, "inner_epoch": inner_epoch})
                         accelerator.log(info, step=global_step)
                         global_step += 1
                         info = defaultdict(list)
+                    else:
+                        # Still need to call step/zero_grad, but Accelerator's accumulate() handles it
+                        # Assertion: Verify we're NOT at the last timestep when not syncing
+                        assert j != num_train_timesteps - 1, \
+                            f"Should sync at last timestep! j={j}, num_train_timesteps={num_train_timesteps}"
+                        optimizer.step()
+                        optimizer.zero_grad()
 
-            # make sure we did an optimization step at the end of the inner epoch
-            total_training_steps = len(samples_batched) * num_train_timesteps
-            expected_accumulation = config.train.gradient_accumulation_steps * num_train_timesteps
-            if total_training_steps >= expected_accumulation:
-                assert accelerator.sync_gradients, \
-                    f"Expected gradient sync but sync_gradients is False. " \
-                    f"Total steps: {total_training_steps}, Expected accumulation: {expected_accumulation}"
+            # Verification: Check that we performed the expected number of optimizer steps
+            expected_optimizer_steps = len(samples_batched)
+            logger.info("=" * 80)
+            logger.info(f"End of inner epoch {inner_epoch} verification:")
+            logger.info(f"  Total batches processed: {len(samples_batched)}")
+            logger.info(f"  Optimizer steps performed: {optimizer_steps_count}")
+            logger.info(f"  Expected optimizer steps: {expected_optimizer_steps}")
+            assert optimizer_steps_count == expected_optimizer_steps, \
+                f"Optimizer step count mismatch! Expected {expected_optimizer_steps}, got {optimizer_steps_count}"
+            logger.info("  ✓ All batches processed correctly")
+            logger.info("=" * 80)
+            
+            # Verify final parameter state
+            if accelerator.is_main_process and initial_param_norm is not None:
+                sample_param = next(iter(unet.parameters()))
+                final_param_norm = sample_param.data.norm().item()
+                logger.info(f"Final parameter norm (sample): {final_param_norm:.6f}")
+                logger.info(f"Total parameter change: {abs(final_param_norm - initial_param_norm):.6f}")
 
         if epoch != 0 and epoch % config.save_freq == 0 and accelerator.is_main_process:
             accelerator.save_state()
