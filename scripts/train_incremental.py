@@ -626,8 +626,8 @@ def main(_):
                     assert should_sync == (j == num_train_timesteps - 1), \
                         f"Sync logic error: should_sync={should_sync}, j={j}, num_train_timesteps={num_train_timesteps}"
                     
-                    # Use no_sync() to prevent automatic sync except at the last timestep
-                    sync_context = accelerator.no_sync(unet) if not should_sync else nullcontext()
+                    # No sync context
+                    sync_context = accelerator.no_sync(unet)
                     
                     with sync_context:
                         with accelerator.accumulate(unet):
@@ -720,6 +720,11 @@ def main(_):
                         total_grad_norm = total_grad_norm ** (1. / 2)
                         logger.info(f"  Gradient norm before clipping: {total_grad_norm:.6f}")
                         
+                        if accelerator.num_processes > 1:
+                            for param in unet.parameters():
+                                if param.grad is not None:
+                                    accelerator.reduce(param.grad, reduction="mean")
+                        
                         accelerator.clip_grad_norm_(
                             unet.parameters(), config.train.max_grad_norm
                         )
@@ -785,13 +790,13 @@ def main(_):
                         accelerator.log(info, step=global_step)
                         global_step += 1
                         info = defaultdict(list)
-                    else:
+                    # else:
                         # Still need to call step/zero_grad, but Accelerator's accumulate() handles it
                         # Assertion: Verify we're NOT at the last timestep when not syncing
-                        assert j != num_train_timesteps - 1, \
-                            f"Should sync at last timestep! j={j}, num_train_timesteps={num_train_timesteps}"
-                        optimizer.step()
-                        optimizer.zero_grad()
+                        # assert j != num_train_timesteps - 1, \
+                        #     f"Should sync at last timestep! j={j}, num_train_timesteps={num_train_timesteps}"
+                        # optimizer.step()
+                        # optimizer.zero_grad()
 
             # Verification: Check that we performed the expected number of optimizer steps
             expected_optimizer_steps = len(samples_batched)
