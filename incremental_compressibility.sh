@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=incremental_compressibility_0110
+#SBATCH --job-name=incremental_compressibility_0111
 #SBATCH --partition=batch
 #SBATCH --gpus=h200:4
 #SBATCH --nodelist=sof1-h200-2
@@ -196,7 +196,7 @@ echo "════════════════════════�
 echo ""
 
 export PYTHONUNBUFFERED=1
-RUN_NAME="incremental_compressibility_0110"
+RUN_NAME="incremental_compressibility_0111"
 
 # ============================================================================
 # STAGE 6.5: Verify GPU allocation
