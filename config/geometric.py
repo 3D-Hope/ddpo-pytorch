@@ -3,10 +3,14 @@ Configuration for training with geometric vanishing point reward.
 Optimized for speed while maintaining good accuracy.
 """
 import ml_collections
+import imp
+import os
+
+base = imp.load_source("base", os.path.join(os.path.dirname(__file__), "base.py"))
 
 
 def get_config():
-    config = ml_collections.ConfigDict()
+    config = base.get_config()
     
     ###### General ######
     config.run_name = ""
