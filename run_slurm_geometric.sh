@@ -141,7 +141,7 @@ pip install -e . || {
     echo "❌ Failed to install project"; exit 1
 }
 
-pip install bitsandbytes opencv-python
+pip install bitsandbytes opencv-python scikit-learn
 
 echo "✅ Dependencies installed successfully"
 echo ""
