@@ -24,15 +24,15 @@ def get_config():
     
     ###### Sampling ######
     config.sample = sample = ml_collections.ConfigDict()
-    sample.num_steps = 25  # Reduced from 50 for faster sampling
+    sample.num_steps = 50
     sample.guidance_scale = 5.0
     sample.eta = 1.0
-    sample.batch_size = 1
-    sample.num_batches_per_epoch = 16
+    sample.batch_size = 16
+    sample.num_batches_per_epoch = 2
     
     ###### Training ######
     config.train = train = ml_collections.ConfigDict()
-    train.batch_size = 1
+    train.batch_size = 8
     train.num_inner_epochs = 1
     train.use_8bit_adam = False
     train.learning_rate = 5e-4
@@ -40,7 +40,7 @@ def get_config():
     train.adam_beta2 = 0.999
     train.adam_weight_decay = 1e-4
     train.adam_epsilon = 1e-8
-    train.gradient_accumulation_steps = 4
+    train.gradient_accumulation_steps = 1
     train.max_grad_norm = 1.0
     train.num_train_timesteps = 1000
     train.cfg = True
