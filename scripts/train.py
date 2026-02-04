@@ -132,6 +132,9 @@ def main(_):
     # switch to DDIM scheduler
     pipeline.scheduler = DDIMScheduler.from_config(pipeline.scheduler.config)
 
+    # Enable gradient checkpointing to save memory
+    pipeline.unet.enable_gradient_checkpointing()
+
     # For mixed precision training we cast all non-trainable weigths (vae, non-lora text_encoder and non-lora unet) to half-precision
     # as these weights are only used for inference, keeping weights in full precision is not required.
     inference_dtype = torch.float32
@@ -521,99 +524,99 @@ def main(_):
                 else:
                     embeds = sample["prompt_embeds"]
 
-                for j in tqdm(
-                    range(num_train_timesteps),
-                    desc="Timestep",
-                    position=1,
-                    leave=False,
-                    disable=not accelerator.is_local_main_process,
-                ):
-                    with accelerator.accumulate(unet):
-                        with autocast():
-                            if config.train.cfg:
-                                noise_pred = unet(
-                                    torch.cat([sample["latents"][:, j]] * 2),
-                                    torch.cat([sample["timesteps"][:, j]] * 2),
-                                    embeds,
-                                ).sample
-                                noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
-                                noise_pred = (
-                                    noise_pred_uncond
-                                    + config.sample.guidance_scale
-                                    * (noise_pred_text - noise_pred_uncond)
-                                )
-                            else:
-                                noise_pred = unet(
-                                    sample["latents"][:, j],
-                                    sample["timesteps"][:, j],
-                                    embeds,
-                                ).sample
-                            # compute the log prob of next_latents given latents under the current model
-                            _, log_prob = ddim_step_with_logprob(
-                                pipeline.scheduler,
-                                noise_pred,
-                                sample["timesteps"][:, j], # uses the correct timestep value as permuted earlier because this is the sampled samples that is constant for this epoch.
+            for j in tqdm(
+                range(num_train_timesteps),
+                desc="Timestep",
+                position=1,
+                leave=False,
+                disable=not accelerator.is_local_main_process,
+            ):
+                with accelerator.accumulate(unet):
+                    with autocast():
+                        if config.train.cfg:
+                            noise_pred = unet(
+                                torch.cat([sample["latents"][:, j]] * 2),
+                                torch.cat([sample["timesteps"][:, j]] * 2),
+                                embeds,
+                            ).sample
+                            noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+                            noise_pred = (
+                                noise_pred_uncond
+                                + config.sample.guidance_scale
+                                * (noise_pred_text - noise_pred_uncond)
+                            )
+                        else:
+                            noise_pred = unet(
                                 sample["latents"][:, j],
-                                eta=config.sample.eta,
-                                prev_sample=sample["next_latents"][:, j],
-                            )
-
-                        # ppo logic
-                        advantages = torch.clamp(
-                            sample["advantages"],
-                            -config.train.adv_clip_max,
-                            config.train.adv_clip_max,
+                                sample["timesteps"][:, j],
+                                embeds,
+                            ).sample
+                        # compute the log prob of next_latents given latents under the current model
+                        _, log_prob = ddim_step_with_logprob(
+                            pipeline.scheduler,
+                            noise_pred,
+                            sample["timesteps"][:, j], # uses the correct timestep value as permuted earlier because this is the sampled samples that is constant for this epoch.
+                            sample["latents"][:, j],
+                            eta=config.sample.eta,
+                            prev_sample=sample["next_latents"][:, j],
                         )
-                        ratio = torch.exp(log_prob - sample["log_probs"][:, j])
-                        unclipped_loss = -advantages * ratio
-                        clipped_loss = -advantages * torch.clamp(
-                            ratio,
-                            1.0 - config.train.clip_range,
-                            1.0 + config.train.clip_range,
-                        )
-                        loss = torch.mean(torch.maximum(unclipped_loss, clipped_loss))
 
-                        # debugging values
-                        # John Schulman says that (ratio - 1) - log(ratio) is a better
-                        # estimator, but most existing code uses this so...
-                        # http://joschu.net/blog/kl-approx.html
-                        info["approx_kl"].append(
-                            0.5
-                            * torch.mean((log_prob - sample["log_probs"][:, j]) ** 2)
-                        )
-                        info["clipfrac"].append(
-                            torch.mean(
-                                (
-                                    torch.abs(ratio - 1.0) > config.train.clip_range
-                                ).float()
-                            )
-                        )
-                        info["loss"].append(loss)
+                    # ppo logic
+                    advantages = torch.clamp(
+                        sample["advantages"],
+                        -config.train.adv_clip_max,
+                        config.train.adv_clip_max,
+                    )
+                    ratio = torch.exp(log_prob - sample["log_probs"][:, j])
+                    unclipped_loss = -advantages * ratio
+                    clipped_loss = -advantages * torch.clamp(
+                        ratio,
+                        1.0 - config.train.clip_range,
+                        1.0 + config.train.clip_range,
+                    )
+                    loss = torch.mean(torch.maximum(unclipped_loss, clipped_loss))
 
-                        # backward pass
-                        accelerator.backward(loss)
-                        if accelerator.sync_gradients:
-                            accelerator.clip_grad_norm_(
-                                unet.parameters(), config.train.max_grad_norm
-                            )
-                        optimizer.step()
-                        optimizer.zero_grad()
+                    # debugging values
+                    # John Schulman says that (ratio - 1) - log(ratio) is a better
+                    # estimator, but most existing code uses this so...
+                    # http://joschu.net/blog/kl-approx.html
+                    info["approx_kl"].append(
+                        0.5
+                        * torch.mean((log_prob - sample["log_probs"][:, j]) ** 2)
+                    )
+                    info["clipfrac"].append(
+                        torch.mean(
+                            (
+                                torch.abs(ratio - 1.0) > config.train.clip_range
+                            ).float()
+                        )
+                    )
+                    info["loss"].append(loss)
 
-                    # Checks if the accelerator has performed an optimization step behind the scenes
+                    # backward pass
+                    accelerator.backward(loss)
                     if accelerator.sync_gradients:
-                        assert (j == num_train_timesteps - 1) and ( # TODO: verify logic and comm with Saugat
-                            i + 1
-                        ) % config.train.gradient_accumulation_steps == 0
-                        # log training-related stuff
-                        info = {k: torch.mean(torch.stack(v)) for k, v in info.items()}
-                        info = accelerator.reduce(info, reduction="mean")
-                        info.update({"epoch": epoch, "inner_epoch": inner_epoch})
-                        accelerator.log(info, step=global_step)
-                        global_step += 1
-                        info = defaultdict(list)
+                        accelerator.clip_grad_norm_(
+                            unet.parameters(), config.train.max_grad_norm
+                        )
+                    optimizer.step()
+                    optimizer.zero_grad()
 
-            # make sure we did an optimization step at the end of the inner epoch
-            assert accelerator.sync_gradients
+                # Checks if the accelerator has performed an optimization step behind the scenes
+                if accelerator.sync_gradients:
+                    assert (j == num_train_timesteps - 1) and ( # TODO: verify logic and comm with Saugat
+                        i + 1
+                    ) % config.train.gradient_accumulation_steps == 0
+                    # log training-related stuff
+                    info = {k: torch.mean(torch.stack(v)) for k, v in info.items()}
+                    info = accelerator.reduce(info, reduction="mean")
+                    info.update({"epoch": epoch, "inner_epoch": inner_epoch})
+                    accelerator.log(info, step=global_step)
+                    global_step += 1
+                    info = defaultdict(list)
+
+        # make sure we did an optimization step at the end of the inner epoch
+            # assert accelerator.sync_gradients
 
         if epoch != 0 and epoch % config.save_freq == 0 and accelerator.is_main_process:
             accelerator.save_state()

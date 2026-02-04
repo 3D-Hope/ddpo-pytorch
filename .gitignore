@@ -306,3 +306,7 @@ tags
 wandb/
 logs/
 notebooks/
+outputs/
+datasets/
+YorkUrbanDB/
+visualizations_york/
