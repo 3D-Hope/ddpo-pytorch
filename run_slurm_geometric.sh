@@ -245,7 +245,8 @@ accelerate launch \
     --config=config/geometric.py \
     --config.run_name=$RUN_NAME \
     --config.sample.num_steps=50 \
-    --config.incremental_training=False
+    --config.incremental_training=False \
+    --config.resume_from="logs/geometric_algebraic_2026.02.04_14.30.31/checkpoints"
 
 
 
